@@ -6,6 +6,7 @@ from django.core.validators import URLValidator
 from django.utils import timezone
 from flask import abort, Blueprint, json, render_template, request, redirect, jsonify
 from flask_cors import cross_origin
+from flask_jwt_extended import create_access_token
 from werkzeug.datastructures import FileStorage
 from werkzeug.exceptions import BadRequestKeyError
 from werkzeug.utils import secure_filename
@@ -22,6 +23,9 @@ from libs.s3 import get_client_private_key, get_client_public_key_string, s3_upl
 from libs.sentry import make_sentry_client
 from libs.user_authentication import (authenticate_user, authenticate_user_registration, minimal_validation)
 
+from config.settings import FITBIT_CLIENT_ID, FITBIT_CLIENT_SECRET, FITBIT_REDIRECT_URL
+
+from database.fitbit_models import FitbitRecord
 from database.study_models import ParticipantSurvey
 
 
@@ -148,3 +152,103 @@ def upload_digital_selfie():
             return jsonify(error_message), 500
 
         return jsonify("Upload was successful"), 200
+
+
+@external_api.route('/fitbit/request', methods=['GET', 'OPTIONS'])
+@cross_origin(origins=['http://127.0.0.1:5000', 'https://fitbit.ut-wcwh.org']) 
+def fitbit_request():
+
+    patient_id = request.values.get('username').lower()
+    if not patient_id:
+        return jsonify('Malformed request, username not found'), 400
+
+    try:
+        user = Participant.objects.get(patient_id=patient_id)
+    except:
+        return jsonify('Username or password incorrect'), 401
+
+    password = request.values.get('password')
+    if not password:
+        return jsonify('Malformed request, password not found'), 400
+
+    if not user.debug_validate_password(password):
+        return jsonify('Username or password incorrect'), 401
+        
+    access_token = create_access_token(patient_id)
+
+    url = 'https://fitbit.com/oauth2/authorize?response_type=code&client_id={client_id}&scope={scope}&state={state}&redirect_uri={redirect_uri}'
+        .format(
+            client_id=FITBIT_CLIENT_ID,
+            state=jwt_token,
+            scope='%20'.join(SCOPES),
+            redirect_uri=FITBIT_REDIRECT_URL,
+        )
+        
+    should_redirect = request.args.get('redirect', '') == 'true'
+
+    if should_redirect:
+        return redirect(url)
+        
+    return jsonify({
+        'url': url}
+    ), 200
+
+
+def get_token():
+    return base64.b64encode(
+        "{}:{}".format(
+            FITBIT_CLIENT_ID,
+            FITBIT_CLIENT_SECRET
+        ).encode('utf-8')).decode('utf-8')
+
+
+@external_api.route('/fitbit/authorize', methods=['GET', 'OPTIONS'])
+@cross_origin(origins=['http://127.0.0.1:5000', 'https://fitbit.ut-wcwh.org']) 
+def fitbit_authorize():
+    code = request.args.get('code', '')
+    state = request.args.get('state', '')
+
+    if not state or not code:
+        return jsonify({'msg': 'Unauthorized.'}), 403
+
+    try:
+        patient_id = decode_token(state)['identity']
+        participant = Participant.objects.get(patient_id__exact=patient_id)
+    except Exception as e:
+        return jsonify({'msg': 'Unauthorized.'}), 403
+
+    try:
+        r = requests.post(
+            'https://api.fitbit.com/oauth2/token',
+            headers={
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'Authorization': 'Basic {}'.format(get_token()),
+            },
+            data={
+                'client_id': FITBIT_CLIENT_ID,
+                'grant_type': 'authorization_code',
+                'code': code,
+                'redirect_uri': FITBIT_REDIRECT_URL,
+            },
+            timeout=60
+        )
+        r.raise_for_status()
+        resp = r.json()
+        access_token = resp['access_token']
+        refresh_token = resp['refresh_token']
+
+        records = FitbitRecord.objects.filter(user__patient_id__exact=patient_id)
+        if records.exists():
+            # reauthorize, update existing results
+            record: FitbitRecord = records.get()
+            record.access_token = access_token
+            record.refresh_token = refresh_token
+            record.save()
+        else:
+            # new authorize
+            FitbitRecord(access_token=access_token, refresh_token=refresh_token, user=participant).save()
+    except Exception as e:
+        print(e)
+        return jsonify({'msg': 'Error.'}), 500
+
+    return jsonify({'msg': 'Done.'}), 200
