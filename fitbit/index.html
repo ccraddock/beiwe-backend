@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <link rel="icon" href="./static/assets/img/favicons/favicon-32x32.png">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+    <meta name="description" content="Upload your screenshots">
+    <meta name="author" content="Cameron Craddock">
+    <link rel="stylesheet" href="./static/css/sticky-footer.css">
+    <link rel="stylesheet" href="./static/css/bootstrap.min.css">
+    <title>Authorize your Fitbit!</title>
+
+    <style>
+        .jumbotron {
+            background:rgb(191,87,0) !important;
+            color:white !important;
+        }
+        iframe {
+            width: 100%;
+            height: 80vh;
+            border: none;
+        }
+        .modal-dialog {
+            height: 90vh !important;
+        }
+    </style>
+</head>
+<body>
+    <div class="modal fade show">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-body">
+                    <iframe src="https://fitbit.com/oauth2/authorize"></iframe>
+                </div>
+            </div>
+        </div>
+    </div>
+    <main role="main">
+        <div class="container">
+            <div class="jumbotron">
+                <h1>Authorize your Fitbit</h1>
+                <p class="font-italic">Behavioral & Psychological Responses to the COVID-19 Pandemic: A SmartPhone Sensing Study</p>
+            </div>
+
+            <form class="border border-0 pt-4 pl-4 pr-4 pb-1 bg-white" action="https://beiwe-py3.ut-wcwh.org/fitbit/request?redirect=false" method="POST" enctype="multipart/form-data">
+                <div class="form-row">
+                    <p>Please inform your Beiwe credentials to be redirected to the Fitbit platform for authorization.</p>
+                </div>
+                
+                <div id="callback" class="form-row alert">
+                </div>
+
+                <div class="form-row form-group">
+                    <input type="user-text-field" class="form-control" name="username" placeholder="Beiwe Username" autocomplete="username" required>
+                </div>
+                <div class="form-row form-group">
+                    <input id="password-text-field" type="password" class="form-control" name="password" placeholder="Beiwe Password" autocomplete="current-password" required>
+                </div>
+
+                <div class="form-row form-group">
+                    <button type="submit" name="upload" value="upload" id="upload" class="btn btn-block btn-success float-right mt-3">Authorize</button>
+                </div>
+            </form>
+        </div>
+    </main>
+
+    <footer class="footer">
+        <div class="container text-center">
+            <p class="font-italic">Copyright 2020, The University of Texas at Austin, <a href="https://bridgingbarriers.utexas.edu/whole-communities-whole-health/">Whole Communities Whole Health</p>
+        </div>
+    </footer>
+
+    <script src="./static/javascript/jquery-3.5.0.min.js"></script>
+    <script src="./static/javascript/popper.js"></script>
+    <script src="./static/javascript/bootstrap.min.js"></script>
+    <script type="text/javascript">
+
+        $(document).ready(function () {
+
+            $('.modal').modal({ keyboard: false })
+
+            var iframe = $('#modal')[0]
+
+            function oAuth2Callback() {
+                try {
+                    const params = iframe.contentWindow.location.search;
+                    if (params.indexOf('code=') > -1) {
+
+                        // another request
+
+                        return;
+                    }
+                } catch (error) {
+                }
+                window.setTimeout(oAuth2Callback, 1000);
+            }
+
+            $('form').submit(function (e) {
+                e.preventDefault();
+
+		        var form = this;
+
+                $('#callback')
+                    .removeClass('alert-danger alert-success')
+                    .html('');
+
+                var data = new FormData(this);
+
+                $.ajax({
+                    url: form.action,
+                    data: data,
+                    processData: false,
+                    contentType: false,
+                    type: 'POST',
+                    success: function(response){
+                        iframe.src = response.url;
+                        oAuth2Callback();
+                    },
+                    error: function (xhr, ajaxOptions, thrownError) {
+                        form.reset();
+
+                        var message = 'Authorization failed! '
+                        if (xhr.responseText) {
+                            message += JSON.parse(xhr.responseText);
+                        }
+
+                        $('#callback')
+                            .addClass('alert-danger')
+                            .html(message);
+                    }
+                });
+            });
+        });
+
+    </script>
+</body>
+</html>
